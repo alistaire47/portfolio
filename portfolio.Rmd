@@ -1,0 +1,271 @@
+---
+title: "Data Visualization Portfolio"
+author: "Edward Visel"
+output: 
+  flexdashboard::flex_dashboard:
+    storyboard: true
+    theme: "lumen"
+    highlight: "tango"
+    logo: "lacrosse_crop_square.jpg"
+    favicon: "lacrosse_crop_square_favicon.png"
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(knitr)
+library(htmltools)
+```
+
+
+
+### Interactive plot of congressional word usage by party built with plotly {data-commentary-width=700}
+
+```{r wordfreq}
+library(httr)
+library(jsonlite)
+library(tidyverse)
+library(plotly)
+
+apikey <- read_file('~/Documents/R projects/sunlight_api_key.txt')
+phrase <- c('rich', 'middle class', 'poor')
+
+wordfreq <- crossing(phrase = factor(phrase, levels = phrase), 
+                     party = c('D', 'R')) %>% 
+  rowwise() %>%
+  mutate(url = paste0('http://www.capitolwords.org/api/1/dates.json?phrase=', 
+              phrase, '&party=', party, 
+              '&percentages=true&granularity=year&apikey=', apikey),
+         url = URLencode(url)) %>% 
+  mutate(response = list(GET(url)),
+         response = content(response, as = 'text'),
+         response = fromJSON(response)) %>%
+  unnest() %>% 
+  mutate(year = as.integer(year))
+
+# calculate subplot heights
+heights <- prop.table(tapply(wordfreq$count, wordfreq$phrase, max))
+
+wordfreq %>% split(.$phrase) %>% 
+  map(plot_ly, type = 'bar', x = ~year, y = ~count, color = ~party, 
+      colors = c('#4575b4', '#d73027')) %>% 
+  subplot(nrows = 3, shareX = TRUE, titleX = FALSE, titleY = TRUE, 
+          heights = c(.166, .4, .434)) %>% 
+  layout(title = 'Congressional Word Usage by Party',
+         xaxis = list(domain = c(0.1, 1)), 
+         yaxis = list(title = 'rich', dtick = 500, rangemode = 'tozero'),
+         yaxis2 = list(title = 'middle class'), 
+         yaxis3 = list(title = 'poor'),
+         showlegend = FALSE, 
+         updatemenus = list(list(yanchor = 'top',
+                                 y = 1,
+                                 buttons = list(
+                                   list(args = list("type", "bar"),
+                                        label = "Bar"),
+                                   list(args = list("type", "line"),
+                                        label = "Line"))),
+                            list(yanchor = 'top',
+                                 y = .8,
+                                 buttons = list(
+                                   list(args = list('line', list(shape = 'linear')),
+                                        label = 'Linear'),
+                                   list(args = list('line', list(shape = 'hvh')),
+                                        label = 'Step'),
+                                   list(args = list('line', list(shape = 'spline')),
+                                        label = 'Spline')))))
+```
+
+***
+
+```r
+library(tidyverse)
+library(plotly)
+
+# data from Sunlight Foundation Capitol Words API
+
+wordfreq %>% split(.$phrase) %>% 
+    map(plot_ly, type = 'bar', x = ~year, y = ~count, color = ~party, 
+        colors = c('#4575b4', '#d73027')) %>% 
+    subplot(nrows = 3, shareX = TRUE, titleX = FALSE, titleY = TRUE, 
+            heights = c(.166, .4, .434)) %>% 
+    layout(title = 'Congressional Word Usage by Party',
+           xaxis = list(domain = c(0.1, 1)), 
+           yaxis = list(title = 'rich', dtick = 500, rangemode = 'tozero'),
+           yaxis2 = list(title = 'middle class'), 
+           yaxis3 = list(title = 'poor'),
+           showlegend = FALSE, 
+           updatemenus = list(
+               list(yanchor = 'top', y = 1,
+                    buttons = list(
+                        list(args = list("type", "bar"),
+                             label = "Bar"),
+                        list(args = list("type", "line"),
+                             label = "Line"))),
+               list(yanchor = 'top', y = 0.8,
+                    buttons = list(
+                        list(args = list('line', list(shape = 'linear')),
+                             label = 'Linear'),
+                        list(args = list('line', list(shape = 'hvh')),
+                             label = 'Step'),
+                        list(args = list('line', list(shape = 'spline')),
+                             label = 'Spline')))))
+```
+
+
+### Animation of DC home values built with ggplot2 and gganimate {data-commentary-width=700}
+
+```{r zillow}
+img(src = image_uri('~/Documents/R projects/mapp/dc_zip_zhvi-lolli.gif'))
+```
+
+***
+
+```r
+library(tidyverse)
+library(gganimate)
+
+# data from Zillow
+house <- read.csv('Zip_Zhvi_AllHomes.csv')
+dczip <- house %>% filter(State == 'DC') %>% 
+    gather(month, zhvi, starts_with('X')) %>% 
+    filter(!is.na(zhvi))
+
+plots <- ggplot(dczip, 
+                aes(x = RegionName, y = zhvi, colour = zhvi, frame = month), 
+                show.legend = F) + 
+    geom_point() + 
+    geom_segment(aes(xend = ..x.., yend = 0)) + 
+    scale_colour_gradient(low = '#2171b5', high = '#e34a33') + 
+    labs(x = 'Zip Code', y = 'Zillow Home Value Index', title = 'Washington DC Home Values') + 
+    scale_y_continuous(labels = scales::comma) + 
+    theme(text = element_text(family = "Myriad Pro", colour = "gray30"),
+          axis.title = element_text(size = 9, face = 'bold'),
+          plot.title = element_text(face = 'bold'), 
+          axis.ticks = element_line(colour = 'gray70'),
+          legend.position = "none")
+
+gg_animate(plots, saver = 'gif',
+           interval = 0.02, ani.type = 'svg', 
+           ani.width = 600, ani.height = 400)
+```
+
+### Leaflet map of candidates running for president from FEC data {data-commentary-width=700}
+
+```{r leaflet}
+library(dplyr)
+library(leaflet)
+
+candidates <- read.csv('~/Documents/R projects/running_for_president/candidates.csv')
+
+# build HTML for leaflet marker popups and pare unnecessary columns
+candidates_for_map <- candidates %>% filter(!is.na(lat)) %>% 
+    mutate(popup = paste(
+        '<table><tr><th>Candidate:</th><th>', can_nam, '</th></tr>',
+        '<tr><td>Address:</td><td>', 
+        can_str1, can_str2, '<br />',
+        can_cit, can_sta, can_zip, '</td></tr>',
+        '<tr><td>Net Contributions:</td><td>', net_con,
+        '</td></tr></table>'
+    )) %>% 
+    select(lat, lng = lon, popup)
+
+leaflet(candidates_for_map) %>% 
+  setView(-95.71289, 37.09024, zoom = 4) %>%
+  addProviderTiles('CartoDB.Positron') %>% 
+  addMarkers(
+    lat = ~lat, 
+    lng = ~lng,
+    popup = ~popup, 
+    clusterOptions = markerClusterOptions()
+  )
+```
+
+***
+
+```r
+library(dplyr)
+library(leaflet)
+
+# candidate data from http://fec.gov/data/CandidateSummary.do?format=html
+candidates <- read.csv('candidates.csv')
+
+# build HTML for leaflet marker popups
+candidates_for_map <- candidates %>% filter(!is.na(lat)) %>% 
+    mutate(popup = paste(
+        '<table><tr><th>Candidate:</th><th>', can_nam, '</th></tr>',
+        '<tr><td>Address:</td><td>', 
+        can_str1, can_str2, '<br />',
+        can_cit, can_sta, can_zip, '</td></tr>',
+        '<tr><td>Net Contributions:</td><td>', net_con,
+        '</td></tr></table>'
+    )) %>% 
+    select(lat, lng = lon, popup)
+
+leaflet(candidates_for_map) %>% 
+    setView(-95.71289, 37.09024, zoom = 4) %>%
+    addProviderTiles('CartoDB.Positron') %>% 
+    addMarkers(
+        lat = ~lat, 
+        lng = ~lng,
+        popup = ~popup, 
+        clusterOptions = markerClusterOptions()
+    )
+```
+
+
+### Trump presidential campaign disbursement sunburst {data-commentary-width=700}
+
+```{r sunburst}
+library(readr)
+library(sunburstR)
+
+# disbursement data from http://fec.gov/data/CandidateSummary.do?format=html
+donald <- read_csv('~/Documents/R projects/fec_disbursements/Two_Year_Summary_Operating_Expenditures.csv',
+                   skip = 7, trim_ws = TRUE,
+                   col_types = cols(`Payment Date` = col_date(format = '%m/%d/%Y'),
+                                    Amount = col_number()))
+
+donald %>% mutate(Category = gsub('^(\\w+).*', '\\1', Purpose)) %>% 
+  mutate_at(c('Purpose', 'Category', '`Payee Name`'), funs(gsub('-', ' ', .))) %>% 
+  mutate(Categories = paste(Category, 
+                            Purpose, 
+                            `Payee Name`, 
+                            `Report Year`, 
+                            `Report Type`, sep = '-')) %>% 
+  select(Categories, Amount) %>% 
+  sunburst()
+```
+
+***
+
+```r
+library(tidyverse)
+library(sunburstR)
+
+# disbursement data from http://fec.gov/data/CandidateSummary.do?format=html
+donald <- read_csv('Two_Year_Summary_Operating_Expenditures.csv',
+                   skip = 7, trim_ws = TRUE,
+                   col_types = cols(`Payment Date` = col_date(format = '%m/%d/%Y'),
+                                    Amount = col_number()))
+
+donald %>% mutate(Category = gsub('^(\\w+).*', '\\1', Purpose)) %>% 
+    mutate_at(c('Purpose', 'Category', '`Payee Name`'), funs(gsub('-', ' ', .))) %>% 
+    mutate(Categories = paste(Category, 
+                              Purpose, 
+                              `Payee Name`, 
+                              `Report Year`, 
+                              `Report Type`, sep = '-')) %>% 
+    select(Categories, Amount) %>% 
+    sunburst()
+```
+
+### About Me {style="padding: 0px 10%;"}
+
+```{r about_me}
+div(includeMarkdown('about_me.md'), style = 'padding: 25px 10%;')
+```
+
+***
+
+```{r contact}
+div(includeMarkdown('about_me_sidebar.md'), style = 'padding: 25px 10%;')
+```
